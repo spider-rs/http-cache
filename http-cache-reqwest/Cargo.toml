@@ -1,16 +1,17 @@
 [package]
-name = "http-cache-reqwest"
-version = "1.0.0-alpha.6"
-description = "http-cache middleware implementation for reqwest"
+name = "spider-http-cache-reqwest"
+version = "1.0.0-alpha.7"
+description = "http-cache middleware for reqwest with source-chain-preserving transport errors (spider-rs fork of http-cache-reqwest)"
 authors = [
+    "j-mendez <jeff@spider.cloud>",
     "Christian Haynes <06chaynes@gmail.com>",
     "Kat Marchán <kzm@zkat.tech>",
 ]
-repository = "https://github.com/06chaynes/http-cache"
-homepage = "https://http-cache.rs"
+repository = "https://github.com/spider-rs/http-cache"
+homepage = "https://spider.cloud"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-keywords = ["cache", "http", "middleware", "reqwest"]
+keywords = ["cache", "http", "middleware", "reqwest", "spider"]
 categories = ["caching", "web-programming::http-client"]
 edition = "2021"
 rust-version = "1.88.0"
