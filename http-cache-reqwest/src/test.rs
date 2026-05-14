@@ -2588,4 +2588,62 @@ mod bincode_migration {
 
         Ok(())
     }
+
+}
+
+/// Regression: when the underlying transport fails inside the cache
+/// middleware, the resulting error MUST preserve the source chain so
+/// callers can downcast through it (`err.source()` walks down to the
+/// original reqwest::Error) and call `is_connect()`/`is_dns()`/
+/// `is_timeout()` to recover the original transport classification.
+///
+/// Before this fix, `from_box_error` wrapped via
+/// `HttpCacheError::Cache(e.to_string())` which discarded the source.
+/// After: `HttpCacheError::Client(e)` which exposes the BoxError via
+/// `Error::source()`. Downstream consumers (e.g. spider's
+/// `CACHE_WRAPPED_TRANSPORT_AC` workaround) can drop the
+/// string-matching workaround and use proper error inspection.
+#[cfg(feature = "manager-cacache")]
+#[tokio::test]
+async fn from_box_error_preserves_source_chain() -> Result<()> {
+    use std::error::Error as StdError;
+
+    let cache_dir = tempfile::tempdir().expect("temp dir");
+    let manager = CACacheManager::new(cache_dir.path().to_path_buf(), true);
+    let client = ClientBuilder::new(Client::new())
+        .with(Cache(HttpCache {
+            mode: CacheMode::Default,
+            manager,
+            options: Default::default(),
+        }))
+        .build();
+
+    // Trigger a fast TCP-refused error against a port nothing is on.
+    // The cache middleware will call `self.0.run(...)` which boxes
+    // the reqwest error; `from_box_error` then wraps it.
+    let err = match client.get("http://127.0.0.1:1/").send().await {
+        Err(e) => e,
+        Ok(_) => panic!("expected transport error against 127.0.0.1:1"),
+    };
+
+    // The middleware Error must expose its source — that's the
+    // HttpCacheError. And THAT source must expose ITS source — the
+    // BoxError holding the original reqwest transport error.
+    let mid_source = err
+        .source()
+        .expect("middleware error must have source (HttpCacheError)");
+    let inner_source = mid_source.source().expect(
+        "HttpCacheError::Client(BoxError) must expose its source via Error::source()",
+    );
+
+    // Display chain should be the original reqwest error
+    // ("error sending request" / "connection refused" / etc.) NOT
+    // the misleading "Cache error: ..." stringification.
+    let chain_display = format!("{inner_source}");
+    assert!(
+        !chain_display.starts_with("Cache error:"),
+        "source chain leaked the cache wrapper string: {chain_display}"
+    );
+
+    Ok(())
 }

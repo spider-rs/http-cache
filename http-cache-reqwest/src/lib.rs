@@ -549,8 +549,34 @@ fn bad_header(e: reqwest::header::InvalidHeaderValue) -> Error {
     to_middleware_error(HttpCacheError::Cache(e.to_string()))
 }
 
+/// Wrap a `BoxError` (typically a transport-layer reqwest::Error returned
+/// from `self.0.run(middleware)`) into the middleware Error envelope.
+///
+/// Uses `HttpCacheError::Client(BoxError)` rather than
+/// `HttpCacheError::Cache(String)` because:
+///
+///   * `Client(BoxError)` implements `std::error::Error::source()` →
+///     `Some(&BoxError)`, so callers walking the source chain (e.g.
+///     `err.source().and_then(|e| e.downcast_ref::<reqwest::Error>())`)
+///     can recover the original transport error type and call
+///     `is_connect()` / `is_dns()` / `is_timeout()` on it.
+///
+///   * `Cache(String)` discards the source chain entirely (`source() ->
+///     None`), forcing every downstream classifier to fall back to
+///     string-matching the Display output. That misclassified DNS-failed,
+///     TCP-refused, and timeout errors all the same way (downstream
+///     consumers like `spider` were bucketing every wrapped transport
+///     error as 526 ADDRESS_UNREACHABLE — see spider's
+///     `CACHE_WRAPPED_TRANSPORT_AC` workaround).
+///
+/// Semantically `Client` is also more accurate: a transport-layer
+/// failure during a cache-wrapped request IS a client error, not a
+/// cache-storage error. `Cache(String)` remains the right variant for
+/// failures originating in the cache manager itself (header parsing,
+/// converted-response failures, etc.) where there is no underlying
+/// `Error` to preserve.
 fn from_box_error(e: BoxError) -> Error {
-    to_middleware_error(HttpCacheError::Cache(e.to_string()))
+    to_middleware_error(HttpCacheError::Client(e))
 }
 
 #[async_trait::async_trait]
